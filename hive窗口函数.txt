@@ -1,0 +1,310 @@
+网址（有错误）http://blog.csdn.net/qq_26937525/article/details/54925827
+
+jack,2015-01-01,10
+tony,2015-01-02,15
+jack,2015-02-03,23
+tony,2015-01-04,29
+jack,2015-01-05,46
+jack,2015-04-06,42
+tony,2015-01-07,50
+jack,2015-01-08,55
+mart,2015-04-08,62
+mart,2015-04-09,68
+neil,2015-05-10,12
+mart,2015-04-11,75
+neil,2015-06-12,80
+mart,2015-04-13,94
+--
+create table order_info(
+name string,
+time string,
+cost int
+)
+row format delimited fields terminated by ','
+stored as textfile;
+
+load data local inpath "/home/hadoop/mydata/order" into table order_info;
+
+1、想要查询在2015年4月份购买过的顾客及总人数
+
+select name,count(*) over()
+from order_info
+where substring(time,1,7) = '2015-04';
+
+over():规定了group by的字段为空，对应的聚合函数count()就是针对全体数据进行计算
+结果：
+mart	5
+mart	5
+mart	5
+mart	5
+jack	5
+
+去重：
+(1)
+select distinct t1.n,t2.m
+from
+(select distinct (name) n
+from order_info
+where substring(time,1,7) = '2015-04') t1
+
+left join
+(select name name,(count(*) over ()) m
+from order_info
+where substring(time,1,7) = '2015-04') t2
+on t1.n=t2.name;
+
+mark	5
+jack	5
+
+结果：
+mart	2
+jack	2
+
+(2)
+
+select distinct t1.n,t2.m
+from
+(select name n
+from order_info 
+where substring(time,1,7) = '2015-04' 
+group by name) t1
+
+left join
+(select name n,(count(*) over ()) m
+from order_info 
+where substring(time,1,7) = '2015-04' ) t2
+on t1.n=t2.n;
+
+2、
+我们想要去看顾客的购买明细及月购买总额
+select name,time,cost,sum(cost) over(partition by name,month(time)) 
+from order_info;
+
+over修饰sum，partition by规定了sum 的区间，也就是相同的name，和time进行sum求和（还具有按照name和time排序的作用）
+
+3、
+按照名字，时间排序
+select name,time,cost,sum(cost) over(partition by name,month(time) )
+from order_info
+order by name,time;
+
+4、window子句
+我们在上面已经通过使用partition by子句将数据进行了分组的处理.如果我们想要更细粒度的划分，我们就要引入window子句了.
+我们首先要理解两个概念:
+- 如果只使用partition by子句,未指定order by的话,我们的聚合是分组内的聚合.
+- 使用了order by子句,未使用window子句的情况下,默认从起点到当前行.
+
+select name,time,cost,sum(cost) over(partition by name,month(time) order by time)
+from order_info;
+
+
+
+select name,time,cost,sum(cost) over(partition by name order by time rows between current row and UNBOUNDED FOLLOWING )
+from order_info;
+
+window子句：
+- PRECEDING：往前
+- FOLLOWING：往后
+- CURRENT ROW：当前行
+- UNBOUNDED：起点，UNBOUNDED PRECEDING 表示从前面的起点， UNBOUNDED FOLLOWING：表示到后面的终点
+
+select name,time,cost,
+
+sum(cost) over() as sample1,--所有行相加
+
+sum(cost) over(partition by name) as sample2,--按name分组，组内数据相加
+
+sum(cost) over(partition by name order by time) as sample3,--按name分组，组内数据累加,从第一行到当前行
+
+sum(cost) over(partition by name order by time rows between UNBOUNDED PRECEDING and current row )  as sample4 ,													--和sample3一样,由起点到当前行的聚合
+
+sum(cost) over(partition by name order by time rows between 1 PRECEDING and current row) as sample5, --当前行和前面一行做聚合
+
+sum(cost) over(partition by name order by time rows between 1 PRECEDING AND 1 FOLLOWING) as sample6,--当前行和前边一行及后面一行
+
+sum(cost) over(partition by name order by time rows between current row and UNBOUNDED FOLLOWING ) as sample7 --当前行及后面所有行
+
+from order_info;
+
+
+5、我们想要每位顾客(按name分区)购买金额前1/3(先按金额升序排序，再分为3个桶)的交易记录,
+select name,time,cost,
+       ntile(3) over() as sample1 , --全局数据切片
+       ntile(3) over(partition by name), -- 按照name进行分组,在分组内将数据切成3份
+       ntile(3) over(order by cost),--全局按照cost升序排列,数据切成3份
+       ntile(3) over(partition by name order by cost ) --按照name分组，在分组内按照cost升序排列,数据切成3份
+from order_info;
+
+
+create table res(
+name string,
+time string,
+cost int,
+s1 int,
+s2 int,
+s3 int,
+s4 int
+)
+row format delimited fields terminated by '\t'
+stored as textfile;
+
+insert into table res
+select name,time,cost,
+       ntile(3) over() as sample1 , --全局数据切片(分组)
+       ntile(3) over(partition by name), -- 按照name进行分组,在分组内将数据切成3份
+       ntile(3) over(order by cost),--全局按照cost升序排列,数据切成3份
+       ntile(3) over(partition by name order by cost ) --按照name分组，在分组内按照cost升序排列,数据切成3份
+from order_info;
+
+6、计算排名
+数据：
+cookie1 2015-04-12 7
+cookie1 2015-04-11 5
+cookie1 2015-04-15 4
+cookie1 2015-04-16 4
+cookie1 2015-04-13 3
+cookie1 2015-04-14 2
+cookie1 2015-04-10 1
+
+create table lxw1234
+(
+cookieid string,
+createtime string,
+pv int
+)
+row format delimited fields terminated by ' '
+stored as textfile;
+
+load data local inpath "/home/hadoop/mydata/a" into table lxw1234;
+
+
+SELECT 
+cookieid,
+createtime,
+pv,
+
+RANK() OVER(PARTITION BY cookieid ORDER BY pv desc) AS rn1,
+
+DENSE_RANK() OVER(PARTITION BY cookieid ORDER BY pv desc) AS rn2,
+ROW_NUMBER() OVER(PARTITION BY cookieid ORDER BY pv DESC) AS rn3 
+FROM lxw1234 ;
+
+结果：
+cookie1	2015-04-11	5	1	1	1
+cookie1	2015-04-16	4	2	2	2
+cookie1	2015-04-15	4	2	2	3
+cookie1	2015-04-13	3	4	3	4
+cookie1	2015-04-14	2	5	4	5
+cookie1	2015-04-10	1	6	5	6
+cookie2	2015-04-12	8	1	1	1
+cookie2	2015-04-12	7	2	2	2
+cookie2	2015-04-12	6	3	3	3
+cookie2	2015-04-12	5	4	4	4
+cookie2	2015-04-12	4	5	5	5
+cookie2	2015-04-12	4	5	5	6
+cookie2	2015-04-12	1	7	6	7
+cookie2	2015-04-12	1	7	6	8
+cookie3	2015-04-12	9	1	1	1
+cookie3	2015-04-12	7	2	2	2
+cookie3	2015-04-12	7	2	2	3
+cookie3	2015-04-12	5	4	3	4
+cookie3	2015-04-12	3	5	4	5
+cookie3	2015-04-12	3	5	4	6
+cookie3	2015-04-12	2	7	5	7
+cookie3	2015-04-12	2	7	5	8
+
+
+- RANK() 生成数据项在分组中的排名，排名相等会在名次中留下空位
+- DENSE_RANK() 生成数据项在分组中的排名，排名相等会在名次中不会留下空位
+- row_number()从1开始，按照顺序，生成分组内记录的序列,row_number()的值不会存在重复,当排序的值相同时,按照表中记录的顺序进行排列
+
+
+7、查看顾客上次的购买时间
+
+select name,time,cost,
+lag(time,1,'1900-01-01') over(partition by name order by time ) as time1, 
+lag(time,2) over (partition by name order by time) as time2 
+from order_info;
+注:'1900-01-01'是拿不到数据时的默认值
+	1,和2是往上数几条
+结果数据：
+jack	2015-01-01	10	1900-01-01	NULL
+jack	2015-01-05	46	2015-01-01	NULL
+jack	2015-01-08	55	2015-01-05	2015-01-01
+jack	2015-02-03	23	2015-01-08	2015-01-05
+jack	2015-04-06	42	2015-02-03	2015-01-08
+mart	2015-04-08	62	1900-01-01	NULL
+mart	2015-04-09	68	2015-04-08	NULL
+mart	2015-04-11	75	2015-04-09	2015-04-08
+mart	2015-04-13	94	2015-04-11	2015-04-09
+neil	2015-05-10	12	1900-01-01	NULL
+neil	2015-06-12	80	2015-05-10	NULL
+tony	2015-01-02	15	1900-01-01	NULL
+tony	2015-01-04	29	2015-01-02	NULL
+tony	2015-01-07	50	2015-01-04	2015-01-02
+排过序的原始数据：
+jack	2015-01-01	10
+jack	2015-01-05	46
+jack	2015-01-08	55
+jack	2015-02-03	23
+jack	2015-04-06	42
+mart	2015-04-08	62
+mart	2015-04-09	68
+mart	2015-04-11	75
+mart	2015-04-13	94
+neil	2015-05-10	12
+neil	2015-06-12	80
+tony	2015-01-02	15
+tony	2015-01-04	29
+tony	2015-01-07	50
+
+8、lead函数与lag函数方向相反,取向下的数据.
+
+select name,time,cost,
+lead(time,1,'2017-01-01') over(partition by name order by time ) as time1, 
+lead(time,2,'往下没有了') over (partition by name order by time) as time2 
+from order_info;
+
+
+结果数据：
+jack	2015-01-01	10	2015-01-05	2015-01-08
+jack	2015-01-05	46	2015-01-08	2015-02-03
+jack	2015-01-08	55	2015-02-03	2015-04-06
+jack	2015-02-03	23	2015-04-06	NULL
+jack	2015-04-06	42	2017-01-01	NULL
+mart	2015-04-08	62	2015-04-09	2015-04-11
+mart	2015-04-09	68	2015-04-11	2015-04-13
+mart	2015-04-11	75	2015-04-13	NULL
+mart	2015-04-13	94	2017-01-01	NULL
+neil	2015-05-10	12	2015-06-12	NULL
+neil	2015-06-12	80	2017-01-01	NULL
+tony	2015-01-02	15	2015-01-04	2015-01-07
+tony	2015-01-04	29	2015-01-07	NULL
+tony	2015-01-07	50	2017-01-01	NULL
+
+9、
+first_value和last_value
+
+first_value取分组内排序后，截止到当前行，第一个值
+last_value取分组内排序后，截止到当前行，最后一个值
+
+select name,time,cost,
+first_value(time) over(partition by name order by time) as time1, 
+last_value(time) over(partition by name order by time) as time2 
+from order_info;
+
+结果数据：
+jack	2015-01-01	10	2015-01-01	2015-01-01
+jack	2015-01-05	46	2015-01-01	2015-01-05
+jack	2015-01-08	55	2015-01-01	2015-01-08
+jack	2015-02-03	23	2015-01-01	2015-02-03
+jack	2015-04-06	42	2015-01-01	2015-04-06
+mart	2015-04-08	62	2015-04-08	2015-04-08
+mart	2015-04-09	68	2015-04-08	2015-04-09
+mart	2015-04-11	75	2015-04-08	2015-04-11
+mart	2015-04-13	94	2015-04-08	2015-04-13
+neil	2015-05-10	12	2015-05-10	2015-05-10
+neil	2015-06-12	80	2015-05-10	2015-06-12
+tony	2015-01-02	15	2015-01-02	2015-01-02
+tony	2015-01-04	29	2015-01-02	2015-01-04
+tony	2015-01-07	50	2015-01-02	2015-01-07
