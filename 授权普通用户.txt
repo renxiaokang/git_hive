@@ -1,0 +1,25 @@
+(一)、在root用户下：
+1.在root用户下:创建hive元数据库
+create database if not exists hivedb;
+
+2.在root用户下添加添加用户用户:hadoop
+注意：这地方主机为localhost，可以自定义主机名，比如下面的spark1，需要统一！
+insert into mysql.user(Host,User,Password)values('localhost','hadoop',password('hadoop'));
+
+3.在root用户下给普通用户hadoop授权于hivedb数据库任何主机:
+注意：dentified by 'hadoop' 表示密码
+grant all privileges on hivedb.* to 'hadoop'@'%' identified by 'hadoop';
+
+4.在root用户下给普通用户hadoop授权于hivedb数据库于localhost主机:
+grant all privileges on hivedb.* to 'hadoop'@'localhost' identified by 'hadoop';
+
+5.在root用户下给普通用户hadoop授权于hivedb数据库于spark1主机:
+grant all privileges on hivedb.* to 'hadoop'@'spark1' identified by 'hadoop';
+
+6.flush privileges;
+
+7.use hivedb;
+
+(二)、在普通用户下：
+mysql -uhadoop -phadoop
+
